@@ -1,1 +1,70 @@
+from django.db import models
+
+class LiquidityPool(models.Model):
+    usd_balance = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    token_balance = models.PositiveIntegerField(default=0)
+    transaction_fees = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    @property
+    def token_limit(self):
+        return 1000000
+
+    def add_liquidity(self, usd_amount, token_amount):
+        if self.token_balance + token_amount > self.token_limit:
+            raise ValueError("Token limit exceeded")
+        self.usd_balance += usd_amount
+        self.token_balance += token_amount
+        self.save()
+
+    def remove_liquidity(self, usd_amount, token_amount):
+        if self.usd_balance < usd_amount or self.token_balance < token_amount:
+            raise ValueError("Insufficient liquidity")
+        self.usd_balance -= usd_amount
+        self.token_balance -= token_amount
+        self.save()
+
+    def swap_usd_to_tokens(self, usd_amount, token_price):
+        if self.usd_balance < usd_amount:
+            raise ValueError("Insufficient USD balance")
+        token_amount = usd_amount / token_price
+        if self.token_balance + token_amount > self.token_limit:
+            raise ValueError("Token limit exceeded")
+        self.usd_balance -= usd_amount
+        self.token_balance += token_amount
+        self.transaction_fees += self.calculate_transaction_fee(usd_amount)
+        self.save()
+
+    def swap_tokens_to_usd(self, token_amount, token_price):
+        if self.token_balance < token_amount:
+            raise ValueError("Insufficient token balance")
+        usd_amount = token_amount * token_price
+        self.usd_balance += usd_amount
+        self.token_balance -= token_amount
+        self.transaction_fees += self.calculate_transaction_fee(usd_amount)
+        self.save()
+
+    def calculate_transaction_fee(self, transaction_value):
+        if transaction_value <= 32:
+            return 0.50
+        else:
+            return transaction_value * 0.015
+
+    def distribute_transaction_fees(self):
+        total_fees = self.transaction_fees
+        contribution_total = sum(
+            liquidity_provider.contribution_amount for liquidity_provider in self.liquidityprovider_set.all()
+        )
+
+        for liquidity_provider in self.liquidityprovider_set.all():
+            liquidity_provider_earning = (liquidity_provider.contribution_amount / contribution_total) * total_fees
+            liquidity_provider.earned_amount += liquidity_provider_earning
+            liquidity_provider.save()
+
+        self.transaction_fees = 0
+        self.save()
+
+class LiquidityProvider(models.Model):
+    liquidity_pool = models.ForeignKey(LiquidityPool, on_delete=models.CASCADE)
+    contribution_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    earned_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
